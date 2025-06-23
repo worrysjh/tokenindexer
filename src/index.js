@@ -1,39 +1,98 @@
-require("dotenv").config();
-const express = require("express");
-const app = express();
-const PORT = process.env.PORT || 4000;
-
-app.get("/", (req, res) => {
-  res.send("Token Indexer is running!");
-});
-
-app.listen(PORT, () => {
-  console.log(`Server is listening on port ${PORT}`);
-});
-
-// DB 연결 테스트용 코드
-const pool = require("./db");
-app.get("/test-db", async (req, res) => {
-  try {
-    const result = await pool.query("SELECT NOW()");
-    res.json({ time: result.rows[0].now });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("DB connection failed");
-  }
-});
-
-// 통신 테스트
-const { fetchERC721Info } = require("./services/erc721Reader");
+// Application 비즈니스 로직
+const { ethers } = require("ethers");
+const db = require("./db");
 const networks = require("./config/networks");
+const { subscribeToTransfer } = require("./services/erc721Subscriber");
+const { saveTransferEvent } = require("./services/tokenProcessor");
 
-app.get("/test-erc721", async (req, res) => {
-  const network = networks.ethereum;
-  const contract = "0x8a90cab2b38dba80c64b7734e58ee1db38b8992e";
-  const tokenId = "1";
+/**
+ * 실행 함수
+ * @param {{contract: string, network: string}} options
+ */
 
-  const info = await fetchERC721Info(network.rpcUrl, contract, tokenId);
-  res.json(info || { error: "Failed to fetch token info" });
-});
+const subscribed = new Set();
 
-module.exports = pool;
+async function run({ contract, network }) {
+  try {
+    // 1) DB 연결 확인
+    const res = await db.query("SELECT NOW()");
+    console.log("DB 연결 성공:", res.rows[0]);
+
+    // 2) provider 선택
+    const provider = networks[network];
+
+    if (!provider) {
+      console.error(`네트워크 '${network}'가 구성되어 있지 않습니다.`);
+      process.exit(1);
+    }
+
+    const ws = provider._websocket || provider.websocket;
+    console.log("Provider WebSocket URL:", ws?.url);
+
+    if (ws) {
+      ws.on("open", () => {
+        console.log(`[${network}] WS 연결 성공`);
+        console.log(`${contract} 구독 준비 완료`);
+      });
+      ws.on("error", (err) => {
+        console.error("WS 에러: ", err.message);
+      });
+    } else {
+      console.warn("WebSocket 객체를 찾을 수 없습니다.");
+    }
+    /** 
+    provider.on("block", (blockNumber) => {
+      console.log("새 블록: ", blockNumber);
+    });
+*/
+    const contracts = Array.isArray(contract) ? contract : [contract];
+    for (const addr of contracts) {
+      subscribeToTransfer(provider, contract, async (data) => {
+        console.log("Transfer 이벤트:", data);
+        try {
+          await saveTransferEvent(data, contract, network);
+          console.log("이벤트 DB 저장 완료:", data.tokenId);
+        } catch (err) {
+          console.error("이벤트 DB 저장 실패:", err);
+        }
+      });
+
+      subscribed.add(addr);
+      console.log(`총 구독 중인 컨트랙트: ${subscribed.size}개`);
+    }
+
+    const readline = require("readline").createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    console.log(
+      "추가 구독하려면 컨트랙트 주소를 입력하세요. 종료하려면 'exit'입력."
+    );
+
+    readline.on("line", (line) => {
+      const addr = line.trim();
+      if (addr.toLowerCase() === "exit") {
+        console.log("종료합니다.");
+        process.exit(0);
+      }
+      // 간단한 주소 유효성 검사
+      if (!ethers.isAddress(addr)) {
+        console.warn("잘못된 주소입니다: ", addr);
+        return;
+      }
+      console.log(`런타임 추가 구독: ${addr}`);
+      subscribeToTransfer(provider, addr, async (data) => {
+        await saveTransferEvent(data, addr, network);
+        console.log("이벤트 DB 저장 완료: ", data.tokenId);
+      });
+
+      subscribed.add(addr);
+      console.log(`총 구독 중인 컨트랙트: ${subscribed.size}개`);
+    });
+  } catch (err) {
+    console.error("실행 중 오류 발생: ", err);
+    process.exit(1);
+  }
+}
+
+module.exports = run;
