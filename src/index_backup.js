@@ -5,22 +5,12 @@ const networks = require("./config/networks");
 const { subscribeToTransfer } = require("./services/erc721Subscriber");
 const { saveTransferEvent } = require("./services/tokenProcessor");
 const { searchTokenByTarget } = require("./services/searchToken");
-const { createContract } = require("./models/contract");
 const readline = require("readline");
 
 const contractList = new Set();
 
 let reconnectAttempt = 0;
 let provider;
-
-// 균등 샤딩
-function splitByShard(list, totalShards) {
-  const result = Array.from({ length: totalShards }, () => []);
-  list.forEach((item, idx) => {
-    result[idx % totalShards].push(item);
-  });
-  return result;
-}
 
 // 1) 연결 생성 함수
 function initWebSocket(network) {
@@ -59,28 +49,17 @@ function scheduleReconnect(network) {
 }
 
 // 3) 구독(또는 재구독) 모듈
-async function resubscribeAll(network) {
+function resubscribeAll() {
   for (const addr of contractList) {
     console.log(`(재)구독: ${addr}`);
-    // contracts 테이블에 등록
-    try {
-      await createContract(addr, network);
-
-      subscribeToTransfer(provider, addr, async (data) => {
-        try {
-          await saveTransferEvent(data, addr, network);
-        } catch (err) {
-          console.error("Transfer 이벤트 처리 중 오류: ", err);
-        }
-      });
-    } catch (err) {
-      console.error("컨트랙트 등록 중 오류: ", err);
-    }
+    subscribeToTransfer(provider, addr, async (data) => {
+      await saveTransferEvent(data, addr, network);
+    });
   }
 }
 
 // 4) 초기 실행
-async function run({ contract, network, shard, totalShards }) {
+async function run({ contract, network }) {
   // 1. DB 연결 확인
   try {
     const { rows } = await db.query("SELECT NOW()");
@@ -93,20 +72,9 @@ async function run({ contract, network, shard, totalShards }) {
   // 2. WebSocket 연결 및 구독 초기화
   initWebSocket(network);
 
-  // 3. 초기 구독 주소 등록 (샤딩)
-  const allContracts = Array.isArray(contract) ? contract : [contract];
-  const lowercased = allContracts.map((addr) => addr.toLowerCase());
-
-  const shards = splitByShard(lowercased, totalShards);
-  const myContracts = shards[shard];
-
-  myContracts.forEach((addr) => contractList.add(addr));
-
-  console.log("전달받은 shard:", shard, "totalShards:", totalShards);
-  console.log("allContracts.length:", allContracts.length);
-  console.log(
-    `[샤드 #${shard}] 총 ${contractList.size}개 컨트랙트를 구독합니다.`
-  );
+  // 3. 초기 구독 주소 등록
+  const initial = Array.isArray(contract) ? contract : [contract];
+  initial.forEach((addr) => contractList.add(addr.toLowerCase()));
 
   // 4) 런타임에 주소 추가 구독
   const rl = readline.createInterface({
@@ -169,11 +137,7 @@ async function run({ contract, network, shard, totalShards }) {
     if (provider._websocket?.readyState === 1) {
       console.log(`런타임 구독: ${addr}`);
       subscribeToTransfer(provider, addr, async (data) => {
-        try {
-          await saveTransferEvent(data, addr, network);
-        } catch (err) {
-          console.error("추가 구독 중 오류: ", err);
-        }
+        await saveTransferEvent(data, addr, network);
       });
     }
 

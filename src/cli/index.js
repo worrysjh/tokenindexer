@@ -2,22 +2,33 @@
 const yargs = require("yargs/yargs");
 const { hideBin } = require("yargs/helpers");
 const run = require("../index");
+const contractList = require("../config/contracts");
 
 const argv = yargs(hideBin(process.argv))
   .usage("Usage: $0 --contract <address> [--network <name>]")
-  .option("contract", {
-    alias: "c",
-    type: "string",
-    describe: "구독할 ERC721 컨트랙트 주소",
-    demandOption: true,
-  })
   .option("network", {
     alias: "n",
     type: "string",
     describe: "사용할 네트워크 (ethereum)",
     default: "ethereum",
+    demandOption: true,
+  })
+  .option("shard", {
+    type: "number",
+    demandOption: true,
+  })
+  .option("totalShards", {
+    type: "number",
+    demandOption: true,
   })
   .help()
   .alias("help", "h").argv;
 
-run({ contract: argv.contract, network: argv.network });
+console.log("CLI 파라미터:", argv);
+
+run({
+  contract: contractList,
+  network: argv.network,
+  shard: argv.shard,
+  totalShards: argv.totalShards,
+});

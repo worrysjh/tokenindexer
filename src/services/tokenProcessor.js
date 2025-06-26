@@ -12,7 +12,7 @@ async function saveTransferEvent(
   network
 ) {
   // contracts 테이블에 등록
-  await createContract(contractAddress, network);
+  // await createContract(contractAddress, network);
 
   // tokens 테이블에 삽입/업데이트
   await upsertToken(contractAddress, tokenId, to, tokenURI);

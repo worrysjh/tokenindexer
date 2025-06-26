@@ -2,6 +2,7 @@
 const db = require("../db");
 
 async function createContract(address, network) {
+  let res;
   const text = `
     INSERT INTO contracts(address, network)
     VALUES($1, $2)
@@ -10,7 +11,12 @@ async function createContract(address, network) {
     `;
 
   const values = [address.toLowerCase(), network];
-  const res = await db.query(text, values);
+  try {
+    res = await db.query(text, values);
+    console.log("createContract 결과:", res.rows);
+  } catch (err) {
+    console.error("createContract 결과:", err);
+  }
   return res.rows[0];
 }
 

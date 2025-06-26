@@ -20,11 +20,10 @@ async function upsertToken(tokenId, contractAddress, owner, tokenURI) {
   return res.rows[0];
 }
 
-async function getToken(contractAddress, tokenId) {
-  const text =
-    "SELECT * FROM tokens WHERE contract_address = $1 AND token_id = $2";
-  const res = await db.query(text, [contractAddress.toLowerCase(), tokenId]);
-  return res.rows[0];
+async function getToken(target) {
+  const text = "SELECT * FROM tokens WHERE token_id = $1 OR owner = $1";
+  const res = await db.query(text, [target]);
+  return res.rows;
 }
 
 module.exports = { upsertToken, getToken };
